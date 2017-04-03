@@ -30,5 +30,5 @@
         "psr-4": {
             "Laravel\\Cashier\\": "src/"
         }
-    },
+    }
 }
