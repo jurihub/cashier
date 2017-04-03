@@ -31,11 +31,4 @@
             "Laravel\\Cashier\\": "src/"
         }
     },
-    "extra": {
-        "branch-alias": {
-            "dev-master": "8.0-dev"
-        }
-    },
-    "minimum-stability": "dev",
-    "prefer-stable": true
 }
