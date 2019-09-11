@@ -3,6 +3,12 @@
 namespace Laravel\Cashier;
 
 use Exception;
+use Carbon\Carbon;
+use InvalidArgumentException;
+use Stripe\Token as StripeToken;
+use Stripe\Source as StripeSource;
+use Stripe\Charge as StripeCharge;
+use Stripe\Refund as StripeRefund;
 use Illuminate\Support\Collection;
 use Laravel\Cashier\Exceptions\InvalidStripeCustomer;
 use Stripe\BankAccount as StripeBankAccount;
@@ -168,8 +174,18 @@ trait Billable
             return $subscription->valid();
         }
 
-        return $subscription->valid() &&
-               $subscription->stripe_plan === $plan;
+        if ($subscription->valid() && $subscription->stripe_plan === $plan) {
+            return true;
+        }
+
+        // ToDo Adcaelo : Check Ajout Jurihub
+        $plan = $this->subscriptionItem($plan);
+
+        if (!is_null($plan) && $subscription->valid()) {
+            return true;
+        }
+
+        return false;
     }
 
     /**
@@ -654,6 +670,11 @@ trait Billable
             if ($subscription->stripe_plan === $plan) {
                 return true;
             }
+
+            // ToDo Adcaelo : Check Ajout Jurihub
+            if ($subscription->hasItem($plan)) {
+                return true;
+            }
         }
 
         return false;
@@ -670,6 +691,15 @@ trait Billable
         return ! is_null($this->subscriptions->first(function ($value) use ($plan) {
             return $value->stripe_plan === $plan && $value->valid();
         }));
+
+        // ToDo Adcaelo : Check Ajout Jurihub
+        $subscription = $this->subscriptionByPlan($plan);
+
+        if (!is_null($subscription)) {
+            return $subscription->valid();
+        }
+
+        return false;
     }
 
     /**
@@ -718,6 +748,24 @@ trait Billable
         $this->stripe_id = $customer->id;
 
         $this->save();
+
+
+        /**
+         *
+         * ToDo Adcaelo Creuser ici car on a perdu le token !
+         *
+         */
+
+        // Next we will add the credit card to the user's account on Stripe using this
+        // token that was provided to this method. This will allow us to bill users
+        // when they subscribe to plans or we need to do one-off charges on them.
+        if (! is_null($token)) {
+            if (preg_match("/^src_(.*)/i", $token) > 0) {
+                $this->updateSepa($token);
+            } else {
+                $this->updateCard($token); // => updateDefaultPaymentMethodFromStripe
+            }
+        }
 
         return $customer;
     }
@@ -790,4 +838,192 @@ trait Billable
     {
         return Cashier::stripeOptions($options);
     }
+
+
+    /**
+     *
+     * Jurihub Cashier Multiplan
+     *
+     */
+
+    /**
+     * Update customer's iban for SEPA.
+     *
+     * @param  string  $token
+     * @return void
+     */
+    public function updateSepa($token)
+    {
+        $customer = $this->asStripeCustomer();
+        $token = StripeSource::retrieve($token, ['api_key' => $this->getStripeKey()]);
+
+        // If the given token already has the iban as their default source, we can just
+        // bail out of the method now. We don't need to keep adding the same iban to
+        // a model's account every time we go through this particular method call.
+        if ($token->id === $customer->default_source) {
+            return;
+        }
+
+        $sepa = $customer->sources->create(['source' => $token]);
+
+        $customer->default_source = $sepa->id;
+
+        $customer->save();
+
+        // Next we will get the default source for this model so we can update the sepa
+        // informations in the database. This allows us to display the information on
+        // the front-end when updating the iban.
+        $source = $customer->default_source
+                    ? $customer->sources->retrieve($customer->default_source)
+                    : null;
+
+        $this->fillSepaDetails($source);
+        $this->save();
+    }
+
+    /**
+     * Synchronises the customer's Sepa from Stripe back into the database.
+     *
+     * @return $this
+     */
+    public function updateSepaFromStripe()
+    {
+        $customer = $this->asStripeCustomer();
+
+        $defaultSepa = null;
+
+        foreach ($customer->sources->data as $sepa) {
+            if ($sepa->id === $customer->default_source) {
+                $defaultSepa = $sepa;
+                break;
+            }
+        }
+
+        if ($defaultSepa) {
+            $this->fillSepaDetails($defaultSepa)->save();
+        } else {
+            $this->forceFill([
+                'sepa_bank_code' => null,
+                'sepa_country' => null,
+                'sepa_fingerprint' => null,
+                'sepa_last_four' => null,
+                'sepa_mandate_reference' => null,
+                'sepa_mandate_url' => null,
+            ])->save();
+        }
+
+        return $this;
+    }
+
+    /**
+     * Fills the model's properties with the source from Stripe.
+     *
+     * @param \Stripe\Source|null  $sepa
+     * @return $this
+     */
+    protected function fillSepaDetails($sepa)
+    {
+        if ($sepa && $sepa->sepa_debit) {
+            $this->sepa_bank_code = $sepa->sepa_debit->bank_code;
+            $this->sepa_country = $sepa->sepa_debit->country;
+            $this->sepa_fingerprint = $sepa->sepa_debit->fingerprint;
+            $this->sepa_last_four = $sepa->sepa_debit->last4;
+            $this->sepa_mandate_reference = $sepa->sepa_debit->mandate_reference;
+            $this->sepa_mandate_url = $sepa->sepa_debit->mandate_url;
+        }
+
+        return $this;
+    }
+
+    /**
+     * Begin creating a new multisubscription.
+     *
+     * @param  string  $subscription
+     * @param  string  $plan
+     * @return \Laravel\Cashier\SubscriptionBuilder
+     */
+    public function newMultisubscription()
+    {
+        return new MultisubscriptionBuilder($this);
+    }
+
+    /**
+     * Get all the subscription items for the user
+     */
+    public function subscriptionItems()
+    {
+        return $this->hasManyThrough(SubscriptionItem::class, Subscription::class)->orderBy('created_at', 'desc');
+    }
+
+    /**
+     * Gets a subscription item instance by name.
+     *
+     * @param  string  $plan
+     * @return \Laravel\Cashier\SubscriptionItem|null
+     */
+    public function subscriptionItem($plan)
+    {
+        $itemsTable = (new SubscriptionItem)->getTable();
+        return $this->subscriptionItems()->where($itemsTable.'.stripe_plan', $plan)->orderBy($itemsTable.'.created_at', 'desc')->first();
+    }
+
+    /**
+     * Adds a plan to the model's subscription
+     *
+     * @param string $plan The plan's ID
+     * @param integer $quantity The plan's quantity
+     * @param string $subscription The subscription's name
+     * @return \Laravel\Cashier\Subscription
+     */
+    public function addPlan($plan, $prorate = true, $quantity = 1, $subscription = 'default')
+    {
+        $subscription = $this->subscription($subscription);
+
+        if (!is_null($subscription)) {
+            return $subscription->addItem($plan, $prorate, $quantity);
+        }
+
+        return $this->newMultisubscription($subscription)->addPlan($plan, $quantity)->create();
+    }
+
+    /**
+     * Removes a plan from the model's subscription
+     *
+     * @param string $plan The plan's ID
+     * @return \Laravel\Cashier\Subscription|null
+     */
+    public function removePlan($plan, $prorate = true, $subscription = 'default')
+    {
+        $subscription = $this->subscription($subscription);
+
+        if (is_null($subscription)) {
+            return null;
+        }
+
+        return $subscription->removeItem($plan, $prorate);
+    }
+
+    /**
+     * Gets the subscription that contains the given plan
+     *
+     * @param string $plan The plan's ID
+     * @return \Laravel\Cashier\Subscription|null
+     */
+    public function subscriptionByPlan($plan)
+    {
+        $subscription = $this->subscriptions()->where('stripe_plan', $plan)->first();
+
+        if (!is_null($subscription)) {
+            return $subscription;
+        }
+
+        $item = $this->subscriptionItem($plan);
+
+        if (is_null($item)) {
+            return null;
+        }
+
+        return $item->subscription;
+    }
+
 }
