@@ -3,6 +3,7 @@
 namespace Laravel\Cashier;
 
 use Carbon\Carbon;
+use DateTimeInterface;
 
 class SubscriptionBuilder
 {
@@ -35,11 +36,11 @@ class SubscriptionBuilder
     protected $quantity = 1;
 
     /**
-     * The number of trial days to apply to the subscription.
+     * The date and time the trial will expire.
      *
-     * @var int|null
+     * @var \Carbon\Carbon|\Carbon\CarbonInterface
      */
-    protected $trialDays;
+    protected $trialExpires;
 
     /**
      * Indicates that the trial should end immediately.
@@ -47,6 +48,13 @@ class SubscriptionBuilder
      * @var bool
      */
     protected $skipTrial = false;
+
+    /**
+     * The date on which the billing cycle should be anchored.
+     *
+     * @var int|null
+     */
+    protected $billingCycleAnchor = null;
 
     /**
      * The coupon code being applied to the customer.
@@ -65,7 +73,7 @@ class SubscriptionBuilder
     /**
      * Create a new subscription builder instance.
      *
-     * @param  mixed  $user
+     * @param  mixed  $owner
      * @param  string  $name
      * @param  string  $plan
      * @return void
@@ -91,14 +99,27 @@ class SubscriptionBuilder
     }
 
     /**
-     * Specify the ending date of the trial.
+     * Specify the number of days of the trial.
      *
      * @param  int  $trialDays
      * @return $this
      */
     public function trialDays($trialDays)
     {
-        $this->trialDays = $trialDays;
+        $this->trialExpires = Carbon::now()->addDays($trialDays);
+
+        return $this;
+    }
+
+    /**
+     * Specify the ending date of the trial.
+     *
+     * @param  \Carbon\Carbon|\Carbon\CarbonInterface  $trialUntil
+     * @return $this
+     */
+    public function trialUntil($trialUntil)
+    {
+        $this->trialExpires = $trialUntil;
 
         return $this;
     }
@@ -111,6 +132,23 @@ class SubscriptionBuilder
     public function skipTrial()
     {
         $this->skipTrial = true;
+
+        return $this;
+    }
+
+    /**
+     * Change the billing cycle anchor on a plan creation.
+     *
+     * @param  \DateTimeInterface|int  $date
+     * @return $this
+     */
+    public function anchorBillingCycleOn($date)
+    {
+        if ($date instanceof DateTimeInterface) {
+            $date = $date->getTimestamp();
+        }
+
+        $this->billingCycleAnchor = $date;
 
         return $this;
     }
@@ -155,51 +193,55 @@ class SubscriptionBuilder
     /**
      * Create a new Stripe subscription.
      *
-     * @param  string|null  $token
+     * @param  \Stripe\PaymentMethod|string|null  $paymentMethod
      * @param  array  $options
      * @return \Laravel\Cashier\Subscription
      */
-    public function create($token = null, array $options = [])
+    public function create($paymentMethod = null, array $options = [])
     {
-        $customer = $this->getStripeCustomer($token, $options);
+        $customer = $this->getStripeCustomer($paymentMethod, $options);
 
-        $subscription = $customer->subscriptions->create($this->buildPayload());
+        /** @var \Stripe\Subscription $stripeSubscription */
+        $stripeSubscription = $customer->subscriptions->create($this->buildPayload());
 
         if ($this->skipTrial) {
             $trialEndsAt = null;
         } else {
-            $trialEndsAt = $this->trialDays ? Carbon::now()->addDays($this->trialDays) : null;
+            $trialEndsAt = $this->trialExpires;
         }
 
-        return $this->owner->subscriptions()->create([
+        $subscription = $this->owner->subscriptions()->create([
             'name' => $this->name,
-            'stripe_id' => $subscription->id,
+            'stripe_id' => $stripeSubscription->id,
+            'stripe_status' => $stripeSubscription->status,
             'stripe_plan' => $this->plan,
             'quantity' => $this->quantity,
             'trial_ends_at' => $trialEndsAt,
             'ends_at' => null,
         ]);
+
+        if ($subscription->incomplete()) {
+            (new Payment(
+                $stripeSubscription->latest_invoice->payment_intent
+            ))->validate();
+        }
+
+        return $subscription;
     }
 
     /**
-     * Get the Stripe customer instance for the current user and token.
+     * Get the Stripe customer instance for the current user and payment method.
      *
-     * @param  string|null  $token
+     * @param  \Stripe\PaymentMethod|string|null  $paymentMethod
      * @param  array  $options
      * @return \Stripe\Customer
      */
-    protected function getStripeCustomer($token = null, array $options = [])
+    protected function getStripeCustomer($paymentMethod = null, array $options = [])
     {
-        if (! $this->owner->stripe_id) {
-            $customer = $this->owner->createAsStripeCustomer(
-                $token, array_merge($options, array_filter(['coupon' => $this->coupon]))
-            );
-        } else {
-            $customer = $this->owner->asStripeCustomer();
+        $customer = $this->owner->createOrGetStripeCustomer($options);
 
-            if ($token) {
-                $this->owner->updateCard($token);
-            }
+        if ($paymentMethod) {
+            $this->owner->updateDefaultPaymentMethod($paymentMethod);
         }
 
         return $customer;
@@ -213,12 +255,15 @@ class SubscriptionBuilder
     protected function buildPayload()
     {
         return array_filter([
+            'billing_cycle_anchor' => $this->billingCycleAnchor,
+            'coupon' => $this->coupon,
+            'expand' => ['latest_invoice.payment_intent'],
+            'metadata' => $this->metadata,
             'plan' => $this->plan,
             'quantity' => $this->quantity,
-            'coupon' => $this->coupon,
-            'trial_end' => $this->getTrialEndForPayload(),
             'tax_percent' => $this->getTaxPercentageForPayload(),
-            'metadata' => $this->metadata,
+            'trial_end' => $this->getTrialEndForPayload(),
+            'off_session' => true,
         ]);
     }
 
@@ -233,15 +278,15 @@ class SubscriptionBuilder
             return 'now';
         }
 
-        if ($this->trialDays) {
-            return Carbon::now()->addDays($this->trialDays)->getTimestamp();
+        if ($this->trialExpires) {
+            return $this->trialExpires->getTimestamp();
         }
     }
 
     /**
      * Get the tax percentage for the Stripe payload.
      *
-     * @return int|null
+     * @return int|float|null
      */
     protected function getTaxPercentageForPayload()
     {

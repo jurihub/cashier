@@ -45,7 +45,7 @@ class Invoice
      */
     public function date($timezone = null)
     {
-        $carbon = Carbon::createFromTimestampUTC($this->invoice->date);
+        $carbon = Carbon::createFromTimestampUTC($this->invoice->created ?? $this->invoice->date);
 
         return $timezone ? $carbon->setTimezone($timezone) : $carbon;
     }
@@ -63,11 +63,11 @@ class Invoice
     /**
      * Get the raw total amount that was paid (or will be paid).
      *
-     * @return float
+     * @return int
      */
     public function rawTotal()
     {
-        return max(0, $this->invoice->total - ($this->rawStartingBalance() * -1));
+        return $this->invoice->total + $this->rawStartingBalance();
     }
 
     /**
@@ -77,9 +77,7 @@ class Invoice
      */
     public function subtotal()
     {
-        return $this->formatAmount(
-            max(0, $this->invoice->subtotal - $this->rawStartingBalance())
-        );
+        return $this->formatAmount($this->invoice->subtotal);
     }
 
     /**
@@ -89,7 +87,7 @@ class Invoice
      */
     public function hasStartingBalance()
     {
-        return $this->rawStartingBalance() > 0;
+        return $this->rawStartingBalance() < 0;
     }
 
     /**
@@ -103,14 +101,25 @@ class Invoice
     }
 
     /**
+     * Get the raw starting balance for the invoice.
+     *
+     * @return int
+     */
+    public function rawStartingBalance()
+    {
+        return $this->invoice->starting_balance ?? 0;
+    }
+
+    /**
      * Determine if the invoice has a discount.
      *
      * @return bool
      */
     public function hasDiscount()
     {
-        return $this->invoice->subtotal > 0 && $this->invoice->subtotal != $this->invoice->total
-          && ! is_null($this->invoice->discount);
+        return $this->invoice->subtotal > 0 &&
+            $this->invoice->subtotal != $this->invoice->total &&
+            ! is_null($this->invoice->discount);
     }
 
     /**
@@ -120,7 +129,7 @@ class Invoice
      */
     public function discount()
     {
-        return $this->formatAmount($this->invoice->subtotal - $this->invoice->total);
+        return $this->formatAmount($this->invoice->subtotal + $this->invoice->tax - $this->invoice->total);
     }
 
     /**
@@ -168,9 +177,19 @@ class Invoice
     {
         if (isset($this->invoice->discount->coupon->amount_off)) {
             return $this->formatAmount($this->invoice->discount->coupon->amount_off);
-        } else {
-            return $this->formatAmount(0);
         }
+
+        return $this->formatAmount(0);
+    }
+
+    /**
+     * Get the tax total amount.
+     *
+     * @return string
+     */
+    public function tax()
+    {
+        return $this->formatAmount($this->invoice->tax);
     }
 
     /**
@@ -194,7 +213,7 @@ class Invoice
     }
 
     /**
-     * Get all of the invoie items by a given type.
+     * Get all of the invoice items by a given type.
      *
      * @param  string  $type
      * @return array
@@ -215,21 +234,21 @@ class Invoice
     }
 
     /**
-     * Format the given amount into a string based on the Stripe model's preferences.
+     * Format the given amount into a displayable currency.
      *
      * @param  int  $amount
      * @return string
      */
     protected function formatAmount($amount)
     {
-        return Cashier::formatAmount($amount);
+        return Cashier::formatAmount($amount, $this->invoice->currency);
     }
 
     /**
      * Get the View instance for the invoice.
      *
      * @param  array  $data
-     * @return \Illuminate\View\View
+     * @return \Illuminate\Contracts\View\View
      */
     public function view(array $data)
     {
@@ -252,14 +271,9 @@ class Invoice
             define('DOMPDF_ENABLE_AUTOLOAD', false);
         }
 
-        if (file_exists($configPath = base_path().'/vendor/dompdf/dompdf/dompdf_config.inc.php')) {
-            require_once $configPath;
-        }
-
         $dompdf = new Dompdf;
-
+        $dompdf->setPaper(config('cashier.paper', 'letter'));
         $dompdf->loadHtml($this->view($data)->render());
-
         $dompdf->render();
 
         return $dompdf->output();
@@ -268,30 +282,32 @@ class Invoice
     /**
      * Create an invoice download response.
      *
-     * @param  array   $data
+     * @param  array  $data
      * @return \Symfony\Component\HttpFoundation\Response
      */
     public function download(array $data)
     {
-        $filename = $data['product'].'_'.$this->date()->month.'_'.$this->date()->year.'.pdf';
+        $filename = $data['product'].'_'.$this->date()->month.'_'.$this->date()->year;
 
-        return new Response($this->pdf($data), 200, [
-            'Content-Description' => 'File Transfer',
-            'Content-Disposition' => 'attachment; filename="'.$filename.'"',
-            'Content-Transfer-Encoding' => 'binary',
-            'Content-Type' => 'application/pdf',
-        ]);
+        return $this->downloadAs($filename, $data);
     }
 
     /**
-     * Get the raw starting balance for the invoice.
+     * Create an invoice download response with a specific filename.
      *
-     * @return float
+     * @param  string  $filename
+     * @param  array  $data
+     * @return \Symfony\Component\HttpFoundation\Response
      */
-    public function rawStartingBalance()
+    public function downloadAs($filename, array $data)
     {
-        return isset($this->invoice->starting_balance)
-                   ? $this->invoice->starting_balance : 0;
+        return new Response($this->pdf($data), 200, [
+            'Content-Description' => 'File Transfer',
+            'Content-Disposition' => 'attachment; filename="'.$filename.'.pdf"',
+            'Content-Transfer-Encoding' => 'binary',
+            'Content-Type' => 'application/pdf',
+            'X-Vapor-Base64-Encode' => 'True',
+        ]);
     }
 
     /**
