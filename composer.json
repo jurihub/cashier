@@ -25,9 +25,9 @@
         "illuminate/support": "~5.8.0|^6.0|^7.0",
         "illuminate/view": "~5.8.0|^6.0|^7.0",
         "moneyphp/money": "^3.2",
-        "nesbot/carbon": "^2.0",
+        "nesbot/carbon": "*",
         "stripe/stripe-php": "^6.40",
-        "symfony/http-kernel": "^4.3",
+        "symfony/http-kernel": "*",
         "symfony/intl": "^4.3"
     },
     "require-dev": {
