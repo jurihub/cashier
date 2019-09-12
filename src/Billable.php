@@ -757,27 +757,6 @@ trait Billable
 
         $this->save();
 
-        /**
-         *
-         * START JURIHUB
-         * ToDo Adcaelo Creuser ici car on a perdu le token !
-         *
-         * A SUPPRIMER
-         *
-         */
-       //            // Next we will add the credit card to the user's account on Stripe using this
-       //            // token that was provided to this method. This will allow us to bill users
-       //            // when they subscribe to plans or we need to do one-off charges on them.
-       //            if (! is_null($token)) {
-       //                // NEW => updateDefaultPaymentMethodFromStripe
-       //                if (preg_match("/^src_(.*)/i", $token) > 0) {
-       //                    $this->updateSepa($token); // NEW => fillSourceDetails
-       //                } else {
-       //                    $this->updateCard($token); // NEW => fillPaymentMethodDetails
-       //                }
-       //            }
-        /* END JURIHUB*/
-
         return $customer;
     }
 
@@ -948,102 +927,31 @@ trait Billable
         return $item->subscription;
     }
 
-
     /**
-     *
-     * ToDo Adcaelo : A étudier SEPA
-     *
-     * A SUPPRIMER => maintenant dans 'fillSourceDetails'
-     *
-     */
-
-    /**
-     * Update customer's iban for SEPA.
+     * Update customer's credit card from token.
      *
      * @param  string  $token
      * @return void
      */
-    //      public function updateSepa($token)
-    //      {
-    //          $customer = $this->asStripeCustomer();
-    //          $token = StripeSource::retrieve($token, ['api_key' => $this->getStripeKey()]);
+    public function updateCard($token)
+    {
+        $customer = $this->asStripeCustomer();
+        $token = StripeToken::retrieve($token, ['api_key' => $this->getStripeKey()]);
 
-    //          // If the given token already has the iban as their default source, we can just
-    //          // bail out of the method now. We don't need to keep adding the same iban to
-    //          // a model's account every time we go through this particular method call.
-    //          if ($token->id === $customer->default_source) {
-    //              return;
-    //          }
+        // If the given token already has the card as their default source, we can just
+        // bail out of the method now. We don't need to keep adding the same card to
+        // a model's account every time we go through this particular method call.
+        if ($token->card->id === $customer->default_source) {
+            return;
+        }
 
-    //          $sepa = $customer->sources->create(['source' => $token]);
+        $card = $customer->sources->create(['source' => $token]);
 
-    //          $customer->default_source = $sepa->id;
+        $customer->default_source = $card->id;
 
-    //          $customer->save();
+        $customer->save();
 
-    //          // Next we will get the default source for this model so we can update the sepa
-    //          // informations in the database. This allows us to display the information on
-    //          // the front-end when updating the iban.
-    //          $source = $customer->default_source
-    //                      ? $customer->sources->retrieve($customer->default_source)
-    //                      : null;
-
-    //          $this->fillSepaDetails($source);
-    //          $this->save();
-    //      }
-
-    //      /**
-    //       * Synchronises the customer's Sepa from Stripe back into the database.
-    //       *
-    //       * @return $this
-    //       */
-    //      public function updateSepaFromStripe()
-    //      {
-    //          $customer = $this->asStripeCustomer();
-
-    //          $defaultSepa = null;
-
-    //          foreach ($customer->sources->data as $sepa) {
-    //              if ($sepa->id === $customer->default_source) {
-    //                  $defaultSepa = $sepa;
-    //                  break;
-    //              }
-    //          }
-
-    //          if ($defaultSepa) {
-    //              $this->fillSepaDetails($defaultSepa)->save();
-    //          } else {
-    //              $this->forceFill([
-    //                  'sepa_bank_code' => null,
-    //                  'sepa_country' => null,
-    //                  'sepa_fingerprint' => null,
-    //                  'sepa_last_four' => null,
-    //                  'sepa_mandate_reference' => null,
-    //                  'sepa_mandate_url' => null,
-    //              ])->save();
-    //          }
-
-    //          return $this;
-    //      }
-
-    //      /**
-    //       * Fills the model's properties with the source from Stripe.
-    //       *
-    //       * @param \Stripe\Source|null  $sepa
-    //       * @return $this
-    //       */
-    //      protected function fillSepaDetails($sepa)
-    //      {
-    //          if ($sepa && $sepa->sepa_debit) {
-    //              $this->sepa_bank_code = $sepa->sepa_debit->bank_code;
-    //              $this->sepa_country = $sepa->sepa_debit->country;
-    //              $this->sepa_fingerprint = $sepa->sepa_debit->fingerprint;
-    //              $this->sepa_last_four = $sepa->sepa_debit->last4;
-    //              $this->sepa_mandate_reference = $sepa->sepa_debit->mandate_reference;
-    //              $this->sepa_mandate_url = $sepa->sepa_debit->mandate_url;
-    //          }
-
-    //          return $this;
-    //      }
+        $this->updateDefaultPaymentMethodFromStripe();
+    }
 
 }
