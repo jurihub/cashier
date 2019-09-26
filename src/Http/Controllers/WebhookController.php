@@ -36,13 +36,18 @@ class WebhookController extends Controller
     public function handleWebhook(Request $request)
     {
         $payload = json_decode($request->getContent(), true);
-        $method = 'handle'.Str::studly(str_replace('.', '_', $payload['type']));
+
+        if (! $this->isInTestingEnvironment() && ! $this->eventExistsOnStripe($payload['id'])) {
+            return;
+        }
+
+        $method = 'handle'.studly_case(str_replace('.', '_', $payload['type']));
 
         if (method_exists($this, $method)) {
             return $this->{$method}($payload);
+        } else {
+            return $this->missingMethod();
         }
-
-        return $this->missingMethod();
     }
 
     /**
@@ -115,7 +120,9 @@ class WebhookController extends Controller
      */
     protected function handleCustomerSubscriptionDeleted(array $payload)
     {
-        if ($user = $this->getUserByStripeId($payload['data']['object']['customer'])) {
+        $user = $this->getUserByStripeId($payload['data']['object']['customer']);
+
+        if ($user) {
             $user->subscriptions->filter(function ($subscription) use ($payload) {
                 return $subscription->stripe_id === $payload['data']['object']['id'];
             })->each(function ($subscription) {
@@ -203,9 +210,34 @@ class WebhookController extends Controller
             return;
         }
 
-        $model = config('cashier.model');
+        $model = getenv('STRIPE_MODEL') ?: config('services.stripe.model');
 
         return (new $model)->where('stripe_id', $stripeId)->first();
+    }
+
+    /**
+     * Verify with Stripe that the event is genuine.
+     *
+     * @param  string  $id
+     * @return bool
+     */
+    protected function eventExistsOnStripe($id)
+    {
+        try {
+            return ! is_null(StripeEvent::retrieve($id, config('services.stripe.secret')));
+        } catch (Exception $e) {
+            return false;
+        }
+    }
+
+    /**
+     * Verify if cashier is in the testing environment.
+     *
+     * @return bool
+     */
+    protected function isInTestingEnvironment()
+    {
+        return getenv('CASHIER_ENV') === 'testing';
     }
 
     /**
@@ -229,4 +261,5 @@ class WebhookController extends Controller
     {
         return new Response;
     }
+
 }
