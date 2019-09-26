@@ -252,6 +252,17 @@ class WebhookController extends Controller
     }
 
     /**
+     * Handle failed calls on the controller.
+     *
+     * @param  array  $parameters
+     * @return \Symfony\Component\HttpFoundation\Response
+     */
+    protected function failMethod($parameters = [])
+    {
+        return new Response('Error Webhook', 500);
+    }
+
+    /**
      * Handle calls to missing methods on the controller.
      *
      * @param  array  $parameters
