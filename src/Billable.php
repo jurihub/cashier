@@ -95,12 +95,15 @@ trait Billable
     {
         $this->assertCustomerExists();
 
-        $options = array_merge([
-            'customer' => $this->stripe_id,
-            'amount' => $amount,
-            'currency' => $this->preferredCurrency(),
-            'description' => $description,
-        ], $options);
+        $options = array_merge(
+            [
+                'customer' => $this->stripe_id,
+                'amount' => $amount,
+                'currency' => $this->preferredCurrency(),
+                'description' => $description,
+            ],
+            $options
+        );
 
         return StripeInvoiceItem::create($options, $this->stripeOptions());
     }
@@ -301,7 +304,8 @@ trait Billable
     {
         try {
             $stripeInvoice = StripeInvoice::retrieve(
-                $id, $this->stripeOptions()
+                $id,
+                $this->stripeOptions()
             );
 
             return new Invoice($this, $stripeInvoice);
@@ -397,7 +401,8 @@ trait Billable
     public function createSetupIntent(array $options = [])
     {
         return StripeSetupIntent::create(
-            $options, $this->stripeOptions()
+            $options,
+            $this->stripeOptions()
         );
     }
 
@@ -448,7 +453,8 @@ trait Billable
 
         if ($stripePaymentMethod->customer !== $this->stripe_id) {
             $stripePaymentMethod = $stripePaymentMethod->attach(
-                ['customer' => $this->stripe_id], $this->stripeOptions()
+                ['customer' => $this->stripe_id],
+                $this->stripeOptions()
             );
         }
 
@@ -656,7 +662,6 @@ trait Billable
                 $this->sepa_mandate_reference = $source->sepa_debit->mandate_reference;
                 $this->sepa_mandate_url = $source->sepa_debit->mandate_url;
             }
-
         }
 
         return $this;
@@ -689,7 +694,8 @@ trait Billable
         }
 
         return StripePaymentMethod::retrieve(
-            $paymentMethod, $this->stripeOptions()
+            $paymentMethod,
+            $this->stripeOptions()
         );
     }
 
@@ -799,7 +805,8 @@ trait Billable
         // user from Stripe. This ID will correspond with the Stripe user instances
         // and allow us to retrieve users from Stripe later when we need to work.
         $customer = StripeCustomer::create(
-            $options, $this->stripeOptions()
+            $options,
+            $this->stripeOptions()
         );
 
         $this->stripe_id = $customer->id;
@@ -818,7 +825,9 @@ trait Billable
     public function updateStripeCustomer(array $options = [])
     {
         return StripeCustomer::update(
-            $this->stripe_id, $options, $this->stripeOptions()
+            $this->stripe_id,
+            $options,
+            $this->stripeOptions()
         );
     }
 
@@ -914,7 +923,10 @@ trait Billable
     public function subscriptionItem($plan)
     {
         $itemsTable = (new SubscriptionItem)->getTable();
-        return $this->subscriptionItems()->where($itemsTable.'.stripe_plan', $plan)->orderBy($itemsTable.'.created_at', 'desc')->first();
+        return $this->subscriptionItems()
+            ->where($itemsTable.'.stripe_plan', $plan)
+            ->orderBy($itemsTable.'.created_at', 'desc')
+            ->first();
     }
 
     /**
@@ -1020,5 +1032,4 @@ trait Billable
 
         $this->updateDefaultPaymentMethodFromStripe();
     }
-
 }
