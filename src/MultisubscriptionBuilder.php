@@ -96,10 +96,13 @@ class MultisubscriptionBuilder extends SubscriptionBuilder
     {
         return array_filter([
             'items' => $this->buildPayloadItems(),
+            'billing_cycle_anchor' => $this->billingCycleAnchor,
             'coupon' => $this->coupon,
-            'trial_end' => $this->getTrialEndForPayload(),
-            'tax_percent' => $this->getTaxPercentageForPayload(),
+            'expand' => ['latest_invoice.payment_intent'],
             'metadata' => $this->metadata,
+            'tax_percent' => $this->getTaxPercentageForPayload(),
+            'trial_end' => $this->getTrialEndForPayload(),
+            'off_session' => true,
         ]);
     }
     
@@ -107,7 +110,7 @@ class MultisubscriptionBuilder extends SubscriptionBuilder
     {
         $items = [];
         foreach ($this->plans as $plan => $quantity) {
-            array_push($items,[
+            array_push($items, [
                 'plan' => $plan,
                 'quantity' => $quantity,
             ]);

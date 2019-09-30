@@ -241,7 +241,8 @@ class SubscriptionBuilder
         $customer = $this->owner->createOrGetStripeCustomer($options);
 
         if ($paymentMethod) {
-            if (! is_null($paymentMethod) && is_string($paymentMethod) && (preg_match("/^src_(.*)/i", $paymentMethod) > 0)) {
+            if (! is_null($paymentMethod) && is_string($paymentMethod)
+                && (preg_match("/^src_(.*)/i", $paymentMethod) > 0)) {
                 $this->owner->updateSepa($paymentMethod);
             } else {
                 $this->owner->updateDefaultPaymentMethod($paymentMethod);
