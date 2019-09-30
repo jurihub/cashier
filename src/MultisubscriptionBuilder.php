@@ -42,14 +42,14 @@ class MultisubscriptionBuilder extends SubscriptionBuilder
     /**
      * Creates a new Stripe subscription with multiple plans.
      *
-     * @param  string|null  $token
+     * @param  \Stripe\PaymentMethod|string|null  $paymentMethod
      * @param  array  $options
      * @return \Laravel\Cashier\Subscription
      */
-    public function create($token = null, array $options = [])
+    public function create($paymentMethod = null, array $options = [])
     {
-        $customer = $this->getStripeCustomer($token, $options);
-
+        $customer = $this->getStripeCustomer($paymentMethod, $options);
+          
         $stripeSubscription = $customer->subscriptions->create($this->buildPayload());
 
         if ($this->skipTrial) {
@@ -62,6 +62,7 @@ class MultisubscriptionBuilder extends SubscriptionBuilder
         $subscription = $this->owner->subscriptions()->create([
             'name' => $this->name,
             'stripe_id' => $stripeSubscription->id,
+            'stripe_status' => $stripeSubscription->status,
             'stripe_plan' => '',
             'quantity' => 0,
             'trial_ends_at' => $trialEndsAt,
@@ -75,6 +76,12 @@ class MultisubscriptionBuilder extends SubscriptionBuilder
                 'stripe_plan' => $item['plan']['id'],
                 'quantity' => $item['quantity'],
             ]);
+        }
+
+        if ($subscription->incomplete()) {
+            (new Payment(
+                $stripeSubscription->latest_invoice->payment_intent
+            ))->validate();
         }
         
         return $subscription;

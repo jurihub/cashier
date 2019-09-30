@@ -28,6 +28,13 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 trait Billable
 {
     /**
+     * The Stripe API key.
+     *
+     * @var string
+     */
+    protected static $stripeKey;
+
+    /**
      * Make a "one off" charge on the customer for the given amount.
      *
      * @param  int  $amount
@@ -475,6 +482,15 @@ trait Billable
             $this->forceFill([
                 'card_brand' => null,
                 'card_last_four' => null,
+                'card_exp_month' => null,
+                'card_exp_year' => null,
+
+                'sepa_bank_code' => null,
+                'sepa_country' => null,
+                'sepa_fingerprint' => null,
+                'sepa_last_four' => null,
+                'sepa_mandate_reference' => null,
+                'sepa_mandate_url' => null,
             ])->save();
         }
     }
@@ -564,6 +580,15 @@ trait Billable
             $this->forceFill([
                 'card_brand' => null,
                 'card_last_four' => null,
+                'card_exp_month' => null,
+                'card_exp_year' => null,
+
+                'sepa_bank_code' => null,
+                'sepa_country' => null,
+                'sepa_fingerprint' => null,
+                'sepa_last_four' => null,
+                'sepa_mandate_reference' => null,
+                'sepa_mandate_url' => null,
             ])->save();
         }
 
@@ -581,6 +606,15 @@ trait Billable
         if ($paymentMethod->type === 'card') {
             $this->card_brand = $paymentMethod->card->brand;
             $this->card_last_four = $paymentMethod->card->last4;
+            $this->card_exp_month = $paymentMethod->card->exp_month;
+            $this->card_exp_year = $paymentMethod->card->exp_year;
+        
+            $this->sepa_bank_code = null;
+            $this->sepa_country = null;
+            $this->sepa_fingerprint = null;
+            $this->sepa_last_four = null;
+            $this->sepa_mandate_reference = null;
+            $this->sepa_mandate_url = null;
         }
 
         return $this;
@@ -599,11 +633,22 @@ trait Billable
         if ($source instanceof StripeCard) {
             $this->card_brand = $source->brand;
             $this->card_last_four = $source->last4;
-        } elseif ($source instanceof StripeBankAccount) {
-            $this->card_brand = 'Bank Account';
-            $this->card_last_four = $source->last4;
+            $this->card_exp_month = $source->exp_month;
+            $this->card_exp_year = $source->exp_year;
 
-            if ($source->sepa_debit) {
+            $this->sepa_bank_code = null;
+            $this->sepa_country = null;
+            $this->sepa_fingerprint = null;
+            $this->sepa_last_four = null;
+            $this->sepa_mandate_reference = null;
+            $this->sepa_mandate_url = null;
+        } elseif ($source instanceof StripeBankAccount || $source instanceof StripeSource) {
+            $this->card_brand = 'Bank Account';
+            $this->card_last_four = null;
+            $this->card_exp_month = null;
+            $this->card_exp_year = null;
+
+            if ($source->type == 'sepa_debit') {
                 $this->sepa_bank_code = $source->sepa_debit->bank_code;
                 $this->sepa_country = $source->sepa_debit->country;
                 $this->sepa_fingerprint = $source->sepa_debit->fingerprint;
@@ -611,6 +656,7 @@ trait Billable
                 $this->sepa_mandate_reference = $source->sepa_debit->mandate_reference;
                 $this->sepa_mandate_url = $source->sepa_debit->mandate_url;
             }
+
         }
 
         return $this;
@@ -931,26 +977,44 @@ trait Billable
     }
 
     /**
-     * Update customer's credit card from token.
+     * Get the Stripe API key.
+     *
+     * @return string
+     */
+    public static function getStripeKey()
+    {
+        if (static::$stripeKey) {
+            return static::$stripeKey;
+        }
+
+        if ($key = getenv('STRIPE_SECRET')) {
+            return $key;
+        }
+
+        return config('services.stripe.secret');
+    }
+
+    /**
+     * Update customer's iban for SEPA.
      *
      * @param  string  $token
      * @return void
      */
-    public function updateCard($token)
+    public function updateSepa($token)
     {
         $customer = $this->asStripeCustomer();
-        $token = StripeToken::retrieve($token, ['api_key' => $this->getStripeKey()]);
+        $token = StripeSource::retrieve($token, ['api_key' => $this->getStripeKey()]);
 
-        // If the given token already has the card as their default source, we can just
-        // bail out of the method now. We don't need to keep adding the same card to
+        // If the given token already has the iban as their default source, we can just
+        // bail out of the method now. We don't need to keep adding the same iban to
         // a model's account every time we go through this particular method call.
-        if ($token->card->id === $customer->default_source) {
+        if ($token->id === $customer->default_source) {
             return;
         }
 
-        $card = $customer->sources->create(['source' => $token]);
+        $sepa = $customer->sources->create(['source' => $token]);
 
-        $customer->default_source = $card->id;
+        $customer->default_source = $sepa->id;
 
         $customer->save();
 
