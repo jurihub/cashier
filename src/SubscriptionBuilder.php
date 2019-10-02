@@ -244,6 +244,7 @@ class SubscriptionBuilder
             if (! is_null($paymentMethod) && is_string($paymentMethod)
                 && (preg_match("/^src_(.*)/i", $paymentMethod) > 0)) {
                 $this->owner->updateSepa($paymentMethod);
+                // ToDo Default !
             } else {
                 $this->owner->updateDefaultPaymentMethod($paymentMethod);
             }
