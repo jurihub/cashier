@@ -190,8 +190,6 @@ trait Billable
             return true;
         }
 
-        // ToDo Adcaelo : Check Ajout Jurihub
-        // Should be OK
         $plan = $this->subscriptionItem($plan);
 
         if (!is_null($plan) && $subscription->valid()) {
@@ -734,8 +732,6 @@ trait Billable
                 return true;
             }
 
-            // ToDo Adcaelo : Check Ajout Jurihub
-            // Should be OK
             if ($subscription->hasItem($plan)) {
                 return true;
             }
@@ -752,8 +748,6 @@ trait Billable
      */
     public function onPlan($plan)
     {
-        // ToDo Adcaelo : Check Ajout Jurihub
-        // Should be OK
         $subscription = $this->subscriptionByPlan($plan);
 
         if (!is_null($subscription)) {
@@ -1025,6 +1019,7 @@ trait Billable
         $sepa = $customer->sources->create(['source' => $token]);
 
         $customer->default_source = $sepa->id;
+        $customer->invoice_settings = ['default_payment_method' => null];
 
         $customer->save();
 
