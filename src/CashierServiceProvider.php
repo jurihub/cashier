@@ -35,6 +35,10 @@ class CashierServiceProvider extends ServiceProvider
     public function register()
     {
         $this->configure();
+
+        $this->commands([
+            Console\UpdateSubscriptionStatus::class
+        ]);
     }
 
     /**
