@@ -45,9 +45,9 @@ class UpdateSubscriptionStatus extends Command
                 $this->info("Processing chunk #$key / $chunks_qty");
                 $chunk->each(function($subscription) {
                     $this->info("    Processing subscribtion #{$subscription->stripe_id}");
-                    $this->info("        Status before update = '{$subscription->stripe_status}'");
+                    $old_status = $subscription->stripe_status;
                     $subscription->syncStripeStatus();
-                    $this->info("        Status after update = '{$subscription->stripe_status}'");
+                    $this->info("        Status update : '{$old_status}' => '{$subscription->stripe_status}'");
                 });
                 usleep(100);
             });
